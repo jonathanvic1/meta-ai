@@ -14,7 +14,7 @@ class Message(BaseModel):
     content: str
 
 class ChatCompletionRequest(BaseModel):
-    model: str = "meta-llama-3"
+    model: str = "meta-llama-3.1"
     messages: List[Message]
     stream: bool = False
 
