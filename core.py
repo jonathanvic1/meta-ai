@@ -25,57 +25,70 @@ class MetaAI:
         }
         self.access_token = None
         self.lsd = None
-        self.datr = None
         self.token_expiry = 0
 
     async def _ensure_session(self):
-        """Initializes an anonymous session if one doesn't exist or is expired."""
+        """Initializes an anonymous session using the newly discovered FetchTempUserCredentialsMutation."""
         if self.access_token and time.time() < self.token_expiry:
             return
 
-        # 1. Fetch main page to get initial cookies and LSD token
+        # 1. Fetch main page to get LSD token
         response = await self.client.get("/")
         html = response.text
-        
-        # Extract LSD token
         lsd_match = re.search(r'\["LSD",\[\],{"token":"(.*?)"}', html)
         if lsd_match:
             self.lsd = lsd_match.group(1)
         
-        # 2. Perform "Accept TOS for Temporary User" mutation
-        # This is the exact mutation Meta AI uses when you first visit in Incognito
-        variables = {
-            "dob": "1999-01-01", 
-            "icebreaker_type": "TEXT"
-        }
-        
+        # 2. Use the discovered useFetchTempUserCredentialsMutation (ID: 2943394199ee6545d1f0c69d5b6e577f)
+        # This is more modern than the TOS acceptance mutation.
         data = {
             "lsd": self.lsd,
             "fb_api_caller_class": "RelayModern",
-            "fb_api_req_friendly_name": "useAbraAcceptTOSForTempUserMutation",
-            "variables": json.dumps(variables),
-            "doc_id": "7604648749596940" # Doc ID for TOS acceptance
+            "fb_api_req_friendly_name": "useFetchTempUserCredentialsMutation",
+            "variables": json.dumps({}), # Usually empty for this mutation
+            "doc_id": "2943394199ee6545d1f0c69d5b6e577f"
         }
         
-        tos_response = await self.client.post("/api/graphql/", data=data, headers=self.headers)
-        tos_json = tos_response.json()
+        response = await self.client.post("/api/graphql/", data=data, headers=self.headers)
+        res_json = response.json()
         
-        # Extract the access token for our new anonymous session
         try:
-            auth_data = tos_json['data']['abra_accept_tos_for_temp_user']['new_temp_user_auth']
-            self.access_token = auth_data['access_token']
-            # Temp tokens usually last ~24 hours, let's refresh every 12 to be safe
-            self.token_expiry = time.time() + (12 * 3600)
+            auth_data = res_json['data']['fetchTempUserCredentials']
+            if auth_data.get('success'):
+                self.access_token = auth_data['accessToken']
+                self.token_expiry = time.time() + (12 * 3600)
+            else:
+                # Fallback to old mutation if this fails
+                await self._fallback_ensure_session()
         except (KeyError, TypeError):
-            print("Error: Could not create temporary anonymous session.")
+            await self._fallback_ensure_session()
 
-    async def chat(self, message: str, conversation_id: str = None) -> AsyncGenerator[str, None]:
+    async def _fallback_ensure_session(self):
+        """Original fallback mutation."""
+        data = {
+            "lsd": self.lsd,
+            "variables": json.dumps({"dob": "1999-01-01", "icebreaker_type": "TEXT"}),
+            "doc_id": "7604648749596940"
+        }
+        response = await self.client.post("/api/graphql/", data=data, headers=self.headers)
+        res_json = response.json()
+        try:
+            auth_data = res_json['data']['abra_accept_tos_for_temp_user']['new_temp_user_auth']
+            self.access_token = auth_data['access_token']
+            self.token_expiry = time.time() + (12 * 3600)
+        except:
+            print("Critial Error: Could not establish Meta AI session.")
+
+    async def chat(self, message: str, conversation_id: str = None, agent_type: str = "think_fast") -> AsyncGenerator[str, None]:
         await self._ensure_session()
         
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
             
         offline_threading_id = str(uuid.uuid4())
+        
+        # Determine if we should enable thinking (from JS discovery)
+        enable_thinking = True if agent_type in ["think_hard", "ruxp", "llama-4-maverick"] else False
         
         variables = {
             "message": {"sensitive_string_value": message},
@@ -87,11 +100,18 @@ class MetaAI:
             "promptPrefix": None,
             "entrypoint": "ABRA__CHAT__TEXT",
             "icebreaker_type": "TEXT",
-            "__relay_internal__pv__AbraDebugDevOnlyrelayprovider": False,
+            # DISCOVERY: Adding internal agent and thinking flags
+            "agent_type": agent_type,
+            "enable_thinking": enable_thinking,
+            # DISCOVERY: Potential developer overrides
+            "dev_overrides": {
+                "model": "llama-4-maverick" if agent_type == "llama-4-maverick" else None,
+                "agent_type": agent_type
+            },
+            "__relay_internal__pv__AbraDebugDevOnlyrelayprovider": True if agent_type != "think_fast" else False,
             "__relay_internal__pv__WebPixelRatiorelayprovider": 1
         }
         
-        # For anonymous users, we use the access_token instead of fb_dtsg
         data = {
             "access_token": self.access_token,
             "fb_api_caller_class": "RelayModern",
@@ -105,7 +125,6 @@ class MetaAI:
             async for line in response.aiter_lines():
                 if not line:
                     continue
-                
                 try:
                     if line.startswith('{"'):
                         chunk = json.loads(line)
@@ -115,13 +134,3 @@ class MetaAI:
                             yield text_delta
                 except json.JSONDecodeError:
                     continue
-
-if __name__ == "__main__":
-    import asyncio
-    async def test():
-        ai = MetaAI()
-        print("Sending: Hello (Anonymous Mode)!")
-        async for text in ai.chat("Hello!"):
-            print(text, end="", flush=True)
-        print("\nDone.")
-    # asyncio.run(test())

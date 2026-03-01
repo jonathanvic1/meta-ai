@@ -6,7 +6,7 @@ import json
 import time
 from core import MetaAI
 
-app = FastAPI(title="Meta AI Unofficial API")
+app = FastAPI(title="Meta AI Unofficial API (Advanced)")
 ai = MetaAI()
 
 class Message(BaseModel):
@@ -18,35 +18,36 @@ class ChatCompletionRequest(BaseModel):
     messages: List[Message]
     stream: bool = False
 
+# Mapping internal agent types found in JS chunk
+MODEL_MAP = {
+    "meta-llama-3.1": "think_fast",
+    "meta-llama-3.1-thinking": "think_hard",
+    "meta-llama-4-maverick": "llama-4-maverick",
+    "meta-llama-ruxp": "ruxp"
+}
+
 @app.get("/")
 async def root():
-    return {"status": "running", "service": "Meta AI Wrapper"}
+    return {"status": "running", "service": "Meta AI Wrapper", "features": list(MODEL_MAP.keys())}
 
 @app.post("/v1/chat/completions")
 async def chat_completion(request: ChatCompletionRequest):
-    # Extract the last message from the conversation
     last_message = request.messages[-1].content
+    # Map the requested model to the internal agent type
+    agent_type = MODEL_MAP.get(request.model, "think_fast")
     
     if request.stream:
         async def event_generator():
             try:
-                async for chunk in ai.chat(last_message):
+                async for chunk in ai.chat(last_message, agent_type=agent_type):
                     data = {
                         "id": "chatcmpl-" + str(int(time.time())),
                         "object": "chat.completion.chunk",
                         "created": int(time.time()),
                         "model": request.model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": chunk},
-                                "finish_reason": None
-                            }
-                        ]
+                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}]
                     }
                     yield f"data: {json.dumps(data)}\n\n"
-                
-                # Signal the end of the stream
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -55,10 +56,9 @@ async def chat_completion(request: ChatCompletionRequest):
         return StreamingResponse(event_generator(), media_type="text/event-stream")
     
     else:
-        # Non-streaming response
         full_text = ""
         try:
-            async for chunk in ai.chat(last_message):
+            async for chunk in ai.chat(last_message, agent_type=agent_type):
                 full_text += chunk
             
             return {
@@ -66,21 +66,7 @@ async def chat_completion(request: ChatCompletionRequest):
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": request.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": full_text
-                        },
-                        "finish_reason": "stop"
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                }
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": full_text}, "finish_reason": "stop"}]
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
