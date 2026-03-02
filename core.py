@@ -43,14 +43,15 @@ class MetaAI:
             if session:
                 self.access_token = session['access_token']
                 self.abra_user_id = session['abra_user_id']
+                self.lsd = session.get('lsd')
                 self.client.cookies.update(session['cookies'])
                 self.token_expiry = time.time() + (12 * 3600)
                 if self.debug:
-                    print(f"DEBUG: Booster session established. UserID: {self.abra_user_id}")
+                    print(f"DEBUG: Booster session established. UserID: {self.abra_user_id} LSD: {self.lsd[:10] if self.lsd else 'None'}...")
                 return
             else:
                 if self.debug:
-                    print("DEBUG: Booster session failed. Falling back to requests-based (might fail).")
+                    print("DEBUG: Booster session failed to capture credentials.")
 
         # Fallback to requests-based (legacy/fast)
         # 0. Get initial cookies
