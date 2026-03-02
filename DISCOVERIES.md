@@ -36,8 +36,8 @@ The assistant has internal support for the following specialized tools (some cur
 Useful for further reverse-engineering of the GraphQL API:
 
 - **Anonymous Credentials Mutation**: `useFetchTempUserCredentialsMutation`
-- **Hex ID**: `2943394199ee6545d1f0c69d5b6e577f`
-- **TOS Mutation ID**: `7604648749596940`
+- **Hex ID**: `2943394199ee6545d1f0c69d5b6e577f` (Stable as of March 2026)
+- **TOS Mutation ID**: `7604648749596940` (Deprecated/Requires LSD)
 - **Chat Send Mutation ID**: `7783822248314888`
 - **Internal WebSocket (DGW)**: `wss://[host].facebook.com:8086/ws`
 
