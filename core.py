@@ -4,10 +4,12 @@ import uuid
 import re
 import time
 from typing import AsyncGenerator, Optional, Dict, Any
+from utils import get_meta_session
 
 class MetaAI:
-    def __init__(self, debug: bool = True, access_token: str = None, lsd: str = None, abra_user_id: str = None, cookies: Dict[str, str] = None):
+    def __init__(self, debug: bool = True, access_token: str = None, lsd: str = None, abra_user_id: str = None, cookies: Dict[str, str] = None, use_booster: bool = False):
         self.debug = debug
+        self.use_booster = use_booster
         self.client = httpx.AsyncClient(
             base_url="https://www.meta.ai",
             follow_redirects=True,
@@ -36,11 +38,23 @@ class MetaAI:
         if self.access_token and time.time() < self.token_expiry:
             return
 
-        # 0. Get initial cookies (datr, etc)
-        # Manually adding datr from browser session to test
-        self.client.cookies.set("datr", "GQilaVBFJ60Ho3kzZZKfHCqX", domain="www.meta.ai")
-        await self.client.get("/")
+        if self.use_booster:
+            session = await get_meta_session(debug=self.debug)
+            if session:
+                self.access_token = session['access_token']
+                self.abra_user_id = session['abra_user_id']
+                self.client.cookies.update(session['cookies'])
+                self.token_expiry = time.time() + (12 * 3600)
+                if self.debug:
+                    print(f"DEBUG: Booster session established. UserID: {self.abra_user_id}")
+                return
+            else:
+                if self.debug:
+                    print("DEBUG: Booster session failed. Falling back to requests-based (might fail).")
 
+        # Fallback to requests-based (legacy/fast)
+        # 0. Get initial cookies
+        await self.client.get("/")
         # 1. Check credentials
         check_data = {
             "doc_id": "2943394199ee6545d1f0c69d5b6e577f",
