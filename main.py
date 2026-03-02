@@ -23,7 +23,14 @@ MODEL_MAP = {
     "meta-llama-3.1": "think_fast",
     "meta-llama-3.1-thinking": "think_hard",
     "meta-llama-4-maverick": "llama-4-maverick",
-    "meta-llama-ruxp": "ruxp"
+    "meta-llama-gpt-5-1-codex": "gpt-5-1-codex",
+    "meta-claude-sonnet-4-5": "claude-sonnet-4-5",
+    "meta-claude-opus-4-5": "claude-opus-4-5",
+    "meta-gemini-3-pro": "gemini-3-pro",
+    "meta-grok-fast": "grok-fast",
+    "meta-omni-prod": "omni-prod",
+    "meta-think_hard": "think_hard",
+    "meta-ruxp": "ruxp"
 }
 
 @app.get("/")
