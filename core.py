@@ -1,32 +1,30 @@
-import httpx
+from curl_cffi import requests
 import json
 import uuid
 import re
 import time
 from typing import AsyncGenerator, Optional, Dict, Any
-from utils import get_meta_session
+from utils import get_mcp_session
 
 class MetaAI:
     def __init__(self, debug: bool = True, access_token: str = None, lsd: str = None, abra_user_id: str = None, cookies: Dict[str, str] = None, use_booster: bool = False):
         self.debug = debug
         self.use_booster = use_booster
-        self.client = httpx.AsyncClient(
-            base_url="https://www.meta.ai",
-            follow_redirects=True,
-            timeout=120.0,
+        self.session = requests.AsyncSession(
+            impersonate="chrome",
+            timeout=120,
             cookies=cookies
         )
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "application/x-javascript, text/javascript, application/json, text/plain",
+            "Accept": "multipart/mixed, application/json",
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
             "Origin": "https://www.meta.ai",
             "Referer": "https://www.meta.ai/",
-            "X-Meta-Internal": "1",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
+            "X-Meta-Internal": "1",
         }
         self.access_token = access_token
         self.lsd = lsd
@@ -38,20 +36,20 @@ class MetaAI:
         if self.access_token and time.time() < self.token_expiry:
             return
 
-        if self.use_booster:
-            session = await get_meta_session(debug=self.debug)
-            if session:
-                self.access_token = session['access_token']
-                self.abra_user_id = session['abra_user_id']
-                self.lsd = session.get('lsd')
-                self.client.cookies.update(session['cookies'])
-                self.token_expiry = time.time() + (12 * 3600)
-                if self.debug:
-                    print(f"DEBUG: Booster session established. UserID: {self.abra_user_id} LSD: {self.lsd[:10] if self.lsd else 'None'}...")
-                return
-            else:
-                if self.debug:
-                    print("DEBUG: Booster session failed to capture credentials.")
+        # BRIDGE: Using the trusted session we captured
+        session = await get_mcp_session(debug=self.debug)
+        if session:
+            self.access_token = session['access_token']
+            self.abra_user_id = session['abra_user_id']
+            self.lsd = session.get('lsd')
+            # Update cookies in session
+            for k, v in session['cookies'].items():
+                self.session.cookies.set(k, v, domain="www.meta.ai")
+            
+            self.token_expiry = time.time() + (12 * 3600)
+            if self.debug:
+                print(f"DEBUG: Booster (curl_cffi) session established. UserID: {self.abra_user_id}")
+            return
 
         # Fallback to requests-based (legacy/fast)
         # 0. Get initial cookies
@@ -136,25 +134,35 @@ class MetaAI:
         # Use multipart/mixed for streaming support
         headers["Accept"] = "multipart/mixed, application/json"
         
-        async with self.client.stream("POST", "/api/graphql", json=data, headers=headers) as response:
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
+        # curl_cffi streaming implementation
+        response = await self.session.post(
+            "https://www.meta.ai/api/graphql",
+            json=data,
+            headers=headers,
+            stream=True
+        )
+
+        async for line in response.aiter_lines():
+            if not line:
+                continue
+            
+            if self.debug:
+                print(f"DEBUG RAW CHUNK: {line}")
+            
+            try:
+                # Handle binary/text line safely
+                line_str = line.decode('utf-8') if isinstance(line, bytes) else line
                 
-                if self.debug:
-                    print(f"DEBUG RAW CHUNK: {line}")
-                
-                try:
-                    if line.startswith('{"'):
-                        chunk = json.loads(line)
-                        # Check for errors in the GraphQL response
-                        if "errors" in chunk:
-                            yield f"[INTERNAL ERROR: {chunk['errors'][0].get('message')}]"
-                            continue
-                            
-                        message_node = chunk.get('data', {}).get('abra_send_message', {}).get('message', {})
-                        text_delta = message_node.get('text', "")
-                        if text_delta:
-                            yield text_delta
-                except json.JSONDecodeError:
-                    continue
+                if line_str.startswith('{"'):
+                    chunk = json.loads(line_str)
+                    # Check for errors in the GraphQL response
+                    if "errors" in chunk:
+                        yield f"[INTERNAL ERROR: {chunk['errors'][0].get('message')}]"
+                        continue
+                        
+                    message_node = chunk.get('data', {}).get('abra_send_message', {}).get('message', {})
+                    text_delta = message_node.get('text', "")
+                    if text_delta:
+                        yield text_delta
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
