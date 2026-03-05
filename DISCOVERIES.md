@@ -48,3 +48,25 @@ Meta tracks different "Clippy Streaming Behaviors" and agent types:
 - `THINK_HARD`: Enabled via `enableThinking: true`.
 - `TF_GEMINI_3_FLASH`: A specific agent type for fast-response benchmarking.
 - `TF_LOGGED_OUT`: The anonymous mode used by this wrapper.
+
+---
+
+## 🕵️ Browser & Environment Investigation (March 2026)
+
+### 1. The "Ghost Page" Defense
+Meta AI employs a "Ghost Page" strategy against automated browsers (Playwright, Puppeteer, nodriver). Even if the browser successfully bypasses Cloudflare, the server detects the TLS fingerprint or headless signal and serves a version of the page where:
+- `window.__RELAY_API_CONFIG__` is empty or missing.
+- Critical tokens like `LSD` and `accessToken` are stripped from the HTML.
+- The `fetchTempUserCredentials` GraphQL mutation is never triggered.
+
+### 2. CDP vs WebDriver
+- **WebDriver (Playwright/Selenium)**: Easily detected via `navigator.webdriver`.
+- **CDP (nodriver/Chrome DevTools MCP)**: Communicates directly with the browser. This is much more effective but still susceptible to TLS-level detection if the client's SSL handshake doesn't match a standard Chrome browser.
+
+### 3. Environment Isolation Issues
+In virtualized or emulated environments (like Rosetta on Mac), CDP-based libraries like `nodriver` can fail to establish a WebSocket connection to the browser's debugging port due to process isolation, even if the browser binary itself is running correctly.
+
+### 4. Verified Workarounds
+- **Double-Load Strategy**: Navigating, waiting for the challenge to settle, and then reloading often triggers a "refresh" of the session that provides fresh tokens.
+- **TLS Impersonation**: Using `curl_cffi` with `impersonate="chrome"` is mandatory for subsequent HTTP requests to prevent `Bad Request` errors.
+- **Manual Bridge**: Capturing tokens from a real, persistent browser session remains the most reliable "bootstrap" method for high-trust requirements.

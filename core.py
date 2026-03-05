@@ -4,7 +4,7 @@ import uuid
 import re
 import time
 from typing import AsyncGenerator, Optional, Dict, Any
-from utils import get_mcp_session
+from utils import get_mcp_session, get_meta_session
 
 class MetaAI:
     def __init__(self, debug: bool = True, access_token: str = None, lsd: str = None, abra_user_id: str = None, cookies: Dict[str, str] = None, use_booster: bool = False):
@@ -36,7 +36,21 @@ class MetaAI:
         if self.access_token and time.time() < self.token_expiry:
             return
 
-        # BRIDGE: Using the trusted session we captured
+        # 1. Try automated Playwright Booster first if requested
+        if self.use_booster:
+            session = await get_meta_session(debug=self.debug)
+            if session:
+                self.access_token = session['access_token']
+                self.abra_user_id = session['abra_user_id']
+                self.lsd = session.get('lsd')
+                for k, v in session['cookies'].items():
+                    self.session.cookies.set(k, v, domain="www.meta.ai")
+                self.token_expiry = time.time() + (12 * 3600)
+                if self.debug:
+                    print(f"DEBUG: Booster (Automated) session established. UserID: {self.abra_user_id}")
+                return
+
+        # 2. Fallback to BRIDGE: Using the trusted session we captured
         session = await get_mcp_session(debug=self.debug)
         if session:
             self.access_token = session['access_token']
